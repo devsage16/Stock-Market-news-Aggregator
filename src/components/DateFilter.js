@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import './styles/App.css';
+import './styles/App.css'; // Importing global CSS
 import fetchArticles from './components/fetchArticle';
 import CategoryFilter from './components/CategoryFilter';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
@@ -8,7 +8,7 @@ import { useNavigate, Routes, Route, Link } from "react-router-dom";
 import { getFirestore, doc, setDoc, getDoc, updateDoc, arrayUnion } from "firebase/firestore";
 import Favorites from './components/Favorites'; // New Favorites component
 
-const db = getFirestore(); // Initialize Firestore
+const db = getFirestore(); // Moved db initialization outside functions to avoid re-initializing
 
 const App = () => {
   const [articles, setArticles] = useState([]);
@@ -19,26 +19,36 @@ const App = () => {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
-  const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false); // For managing loading state when saving favorites
   const navigate = useNavigate();
 
   // Monitor Auth State
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+      if (user) {
+        setUser(user);
+      } else {
+        setUser(null);
+      }
     });
     return unsubscribe;
   }, []);
 
-  // Fetch articles when query changes
+  // Fetch articles when the component mounts or query changes
   useEffect(() => {
     const getArticles = async () => {
       setLoading(true);
       console.log("Fetching articles with query:", query);
       try {
-        const fetchedArticles = await fetchArticles(query);
+        let searchTerm = query;
+        const favoriteCategories = await getFavoriteCategories();
+        if (favoriteCategories.length > 0) {
+          searchTerm = favoriteCategories.join(" OR ");
+        }
+
+        const fetchedArticles = await fetchArticles(searchTerm);
         console.log("Fetched Articles: ", fetchedArticles);
-        setArticles(fetchedArticles);
+        setArticles(fetchedArticles || []);
       } catch (error) {
         console.error("Error fetching articles:", error);
         setArticles([]);
@@ -48,7 +58,7 @@ const App = () => {
     };
 
     getArticles();
-  }, [query]); // Remove user dependency to ensure it fetches on query change only
+  }, [query, user]);
 
   // Handle Search
   const handleSearch = (e) => {
@@ -56,7 +66,7 @@ const App = () => {
     const searchTerm = e.target.elements.search.value.trim();
     if (searchTerm) {
       console.log("Search Term: ", searchTerm);
-      setQuery(searchTerm); // Update query state
+      setQuery(searchTerm);
     } else {
       console.log("No search term entered");
     }
@@ -64,7 +74,11 @@ const App = () => {
 
   // Handle Category Change
   const handleCategoryChange = (category) => {
-    setQuery(category ? category.toLowerCase() : 'latest news');
+    if (!category) {
+      setQuery('latest news'); // Default query when no category is selected
+    } else {
+      setQuery(category.toLowerCase());
+    }
   };
 
   // Handle Sign-Up
@@ -120,10 +134,26 @@ const App = () => {
       });
       console.log('Article added to favorites!');
     } catch (error) {
-      console.error("Error saving favorite article:", error.message);
+      console.error("Error saving favorite article:", error.message, error);
     } finally {
       setFavoriteLoading(false); // Set loading to false after saving
     }
+  };
+
+  // Get Favorite Categories
+  const getFavoriteCategories = async () => {
+    if (!user) return [];
+
+    const userRef = doc(db, 'users', user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if (userSnap.exists()) {
+      const favorites = userSnap.data().favorites || [];
+      const favoriteCategories = favorites.map(article => article.category);
+      return [...new Set(favoriteCategories)];
+    }
+
+    return [];
   };
 
   return (
@@ -196,7 +226,7 @@ const App = () => {
                     </button>
                   </form>
 
-                  {/* Category Filter */}
+                  {/* Updated Category Filter */}
                   <CategoryFilter onCategoryChange={handleCategoryChange} />
 
                   {/* Articles and Favorites UI */}
